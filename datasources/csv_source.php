@@ -1,54 +1,59 @@
 <?php
 /**
- * CSV class
+ * CakePHP CSV datasource
  *
  * Licensed under The MIT License
  * Redistributions of files must retain the above copyright notice.
  *
- * @author Siegfried Hirsch <siegfried.hirsch@gmail.com>
- * @copyright Copyright 2008-2009, Siegfried Hirsch
+ * based on http://bakery.cakephp.org/articles/view/csv-datasource-for-reading-your-csv-files
+ *
  * @license http://www.opensource.org/licenses/mit-license.php The MIT License
- * @created Januar 21, 2009
- * @version 1.0
+ * @author Andrea Dal Ponte <dalpo85@gmail.com>
+ * @created 20/01/2009
+ * @version 0.2
  **/
+
 class CsvSource extends DataSource {
 
   /**
    * Description string for this Data Source.
    *
-   * @var unknown_type
+   * @public unknown_type
    */
-  var $description = "CSV Data Source";
-  var $delimiter = ';'; // delimiter between the columns
-  var $maxCol = 0;
-  var $fields = null; //fieldnames
-  var $handle = false; // handle of the open csv file
-  var $page = 1; // start always on the first page
-  var $limit = 99999; // just to make the chunks not too big
+  public $description = "CSV file datasource";
+
+  public $delimiter = null; // delimiter between the columns
+  public $maxCol = 0;
+  public $fields = null;
+  public $page = 1; // start always on the first page
+  public $limit = 99999; // just to make the chunks not too big
+  protected $_fileHandler = null;
+  protected $_fileHeader  = null;
+  protected $_lineNumber = null;
 
   /**
    * Default configuration.
    *
-   * @var unknown_type
+   * @public unknown_type
    */
-  var $__baseConfig = array(
+  public $_baseConfig = array(
           'datasource' => 'csv',
           'path' => '.', // local path on the server relative to WWW_ROOT
           'extension' => 'csv', // file extension of CSV Files
-          'readonly' => true, // only for reading
           'recursive' => false, // only false is supported at the moment
+          'delimiter' => ',',
+          'startline' => 0
   );
 
   /**
    * Constructor
    */
   function __construct($config = null, $autoConnect = true) {
-    // Configure::write('debug', 1);
+    parent::__construct($config);
     $this->debug = Configure::read('debug') > 0;
     $this->fullDebug = Configure::read('debug') > 1;
-    // debug($config);
-    parent::__construct($config);
-
+    $this->connected = false;
+    $this->delimiter = $this->config['delimiter'];
     if ($autoConnect) {
       return $this->connect();
     } else {
@@ -56,76 +61,24 @@ class CsvSource extends DataSource {
     }
   }
 
+  /**
+   * Destructor
+   */
+  function __destruct() {
+    $this->close();
+  }
+
 
   /**
-   * Connects to the mailbox using options in the given configuration array.
-   *
-   * @return boolean True if the mailbox could be connected, else false
+   * Open the csv file
    */
   function connect() {
-    $config = $this->config;
     $this->connected = false;
-
-    uses('Folder');
-
-    if ($config['readonly']) {
-      $create = false;
-      $mode = 0;
-    } else {
-      $create = true;
-      $mode = 0777;
-    }
-
-    $config['path'] = WWW_ROOT . $config['path'];
-    // debug($config['path']);
-    $this->connection = &new Folder($path = $config['path'], $create, $mode);
-    if ($this->connection) {
-      $this->handle = false;
+    if($this->_initFilePointer()) {
       $this->connected = true;
+      $this->__getDescriptionFromFirstLine();
     }
     return $this->connected;
-  }
-
-
-  /**
-   * listSources
-   *
-   * @author: SHirsch
-   * @created: 21.01.2009
-   * @return array of available CSV files
-   */
-  function listSources() {
-    $config = $this->config;
-
-    if ($this->_sources !== null) {
-      return $this->_sources;
-    }
-
-    if ($config['recursive']) {
-      // not supported yet -> has to use Folder::findRecursive()
-    } else {
-      // list all .csv files and remove the extension to get only "tablenames"
-      $list = $this->connection->find('.*'.$config['extension'], false);
-      foreach ($list as &$l) {
-        if (stripos($l,  '.'.$config['extension']) > 0) {
-          $l = str_ireplace('.'.$config['extension'],  '',  $l);
-        }
-      }
-      $this->_sources = $list;
-    }
-    // debug($list);
-    return $list;
-  }
-  /**
-   * Convenience method for DboSource::listSources().  Returns source names in lowercase.
-   *
-   * @return array
-   */
-  function sources($reset = false) {
-    if ($reset === true) {
-      $this->_sources = null;
-    }
-    return array_map('strtolower', $this->listSources());
   }
 
   /**
@@ -134,86 +87,69 @@ class CsvSource extends DataSource {
    * @return mixed
    **/
   function describe($model) {
-    // debug($model->table);
     $this->__getDescriptionFromFirstLine($model);
-    // debug($this->fields);
     return $this->fields;
   }
 
   /**
    * __getDescriptionFromFirstLine and store into class variables
    *
-   * @author: SHirsch
-   * @created: 21.01.2009
-   *
-   * @param $model
-   * @set CsvSource::fields array with fieldnames from the first line
-   * @set CsvSource::delimiter char the delimiter of this CSV file
-   *
-   * @return true
    */
-  private function __getDescriptionFromFirstLine($model) {
-    $config = $this->config;
-    $filename = $model->table . "." . $config['extension'];
-    $handle = fopen ($config['path'] . DS .  $filename,"r");
-    $line = rtrim(fgets($handle)); // remove \n\r
-    $data_comma = explode(",",$line);
-    $data_semicolon = explode(";",$line);
-
-    if (count($data_comma) > count($data_semicolon)) {
-      $this->delimiter = ',';
-      $this->fields = $data_comma;
-      $this->maxCol = count($data_comma);
-    } else {
-      $this->delimiter = ";";
-      $this->fields = $data_semicolon;
-      $this->maxCol = count($data_semicolon);
+  private function __getDescriptionFromFirstLine() {
+    if(!$this->connected) {
+      $this->connect();
     }
-    fclose($handle);
-    return true;
+    if($this->_lineNumber != $this->config['startline']) {
+      $this->_initFilePointer();
+    }
+    $columns = fgetcsv($this->_fileHandler, 0, $this->config['delimiter']);
+    $this->fields = $columns;
+    $this->maxCol = count($columns);
+    $this->_initFilePointer();
+
+    return (bool)$this->maxCol;
   }
 
-  /* close
-    **
-    ** @created: 21.01.2009 14:59:08
-    **
-  */
-  function close() {
-    if ($this->connected) {
-      if ($this->handle) {
-        @fclose($this->handle);
-        $this->handle = false;
+  protected function _initFilePointer() {
+    $this->_lineNumber = 0;
+    $this->_fileHeader = '';
+    if($this->_fileHandler = fopen($this->config['path'], "r+")) {
+      while( ++$this->_lineNumber < $this->config['startline'] && !feof($this->_fileHandler) ) {
+        $this->_fileHeader.= fgets($this->_fileHandler);
       }
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  /**
+   * File close
+   */
+  function close() {
+    if ($this->connected || $this->_fileHandler) {
+      @fclose($this->_fileHandler);
+      $this->_fileHandler = null;
       $this->connected = false;
     }
   }
 
   /**
-   * The "R" in CRUD
-   *
-   * @param Model $model
-   * @param array $queryData
-   * @param integer $recursive Number of levels of association
-   * @return unknown
+   * 
    */
   function read(&$model, $queryData = array(), $recursive = null) {
-    $config = $this->config;
-    $filename = $config['path'] . DS .  $model->table . "." . $config['extension'];
-    if ($this->handle === false) {
-      $this->handle = fopen($filename,  "r");
-    }
+    if (!$this->connected) { $this->connect(); }
+    if ($this->_lineNumber != $this->config['startline']) { $this->_initFilePointer(); }
     $queryData = $this->__scrubQueryData($queryData);
 
     // get the limit
     if (isset($queryData['limit']) && !empty($queryData['limit'])) {
       $this->limit = $queryData['limit'];
-      // debug($this->limit);
     }
 
     // get the page#
     if (isset($queryData['page']) && !empty($queryData['page'])) {
       $this->page = $queryData['page'];
-      // debug($this->page);
     }
 
     if (empty($queryData['fields'])) {
@@ -233,63 +169,52 @@ class CsvSource extends DataSource {
       }
     }
 
-    $lineCount = 0;
     $recordCount = 0;
     $resultSet = array();
+    if(!$this->limit) { $this->page = 1; }
 
     // Daten werden aus der Datei in ein Array $data gelesen
-    while ( ($data = fgetcsv ($this->handle, 8192, $this->delimiter)) !== FALSE ) {
-      if ($lineCount == 0) {
-        // throw away the first line
-        $lineCount++;
+    while (($data = fgetcsv($this->_fileHandler, 0, $this->delimiter))  && (!feof($this->_fileHandler)) ) {
+      if ($this->_lineNumber++ <= $this->config['startline']) {
         continue;
-        // $_page = 1;
       } else {
-        // compute the virtual pagenumber
-        $_page = floor($lineCount / $this->limit) + 1;
+        $recordCount++;
+
+        if($this->limit) {
+          $currentPage = floor( ($recordCount - 1) / $this->limit) + 1;
+        } else {
+          $currentPage = 1;
+        }
+        
 
         // do have have reached our requested page ?
-        if ($this->page > $_page) {
-          $lineCount++;
-          continue;
-        }
-        // skip over records, that are not complete
-        if (count($data) < $this->maxCol) {
-          $lineCount++;
-          continue;
-        }
+        if ($this->page != $currentPage) { continue; }
 
         $record = array();
         if ($allFields) {
           $i = 0;
-          $record['id'] = $lineCount;
+          $record['id'] = $recordCount;
           foreach($fields as $field) {
             $record[$field] = $data[$i++];
           }
-          $resultSet[] = $record;
         } else {
-          $record['id'] = $lineCount;
+          $record['id'] = $recordCount;
           if (count($_fieldIndex) > 0) {
             foreach($_fieldIndex as $i) {
               $record[$this->fields[$i]] = $data[$i];
             }
           }
-          $resultSet[] = $record;
         }
+        $resultSet[] = array($model->alias => $record);
         unset($record);
 
-        // now count every record
-        $recordCount++;
-        $lineCount++;
+        $breakConditions = $recordCount > ( $this->limit * $this->page);
+        if ( $breakConditions ) { break; }
 
-        // is our page filled with records, then stop
-        if ($recordCount >= $this->limit) {
-          break;
-        }
       }
     }
-    $result[$model->table] = $resultSet;
-    return $result;
+    
+    return $resultSet;
   }
 
   /**
