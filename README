@@ -1,0 +1,68 @@
+CSV Datasource for reading your CSV files
+Originally based on work of Siegfried Hirsch (Siegfried):
+http://bakery.cakephp.org/articles/view/csv-datasource-for-reading-your-csv-filesi
+
+Licensed under The MIT License
+Redistributions of files must retain the above copyright notice.
+
+Example:
+
+
+1. Copy the data source file on your models/datasources/ directory
+
+/app/models/datasources/csv_sourse.php
+
+2. Setup your database connection:
+class DATABASE_CONFIG {
+
+  public $csvFileConfig = array(
+          'datasource' => 'csv',
+          'path' => "/path/to/your/file.csv",
+          'startline' => 7 // Start read the file from the line 7
+  );
+
+  public $default = array(
+          'driver' => 'mysql',
+          'persistent' => false,
+          'host' => 'localhost',
+          'login' => 'user',
+          'password' => 'password',
+          'database' => 'test_database_name',
+          'prefix' => ''
+  );
+}
+
+
+3. Setup your model
+<?php
+class MyModel extends AppModel {
+
+  public $name = 'MyModel';
+  public $useDbConfig = 'csvFileConfig';
+  public $useTable = false;
+
+  
+
+}
+?>
+
+
+4. Now you can retrive the csv data from controller
+<?php
+class ExampleController extends AppController {
+
+  public $name = 'Example';
+  public $uses = array('MyModel');
+
+  function index() {
+
+    //retrive rows with the id bethween 11 and 20
+    $csvData = $this->MyModel->find('all', array('page' => 2, 'limit' => 10));
+
+    $this->set('csvData', $csvData);
+  }
+
+  
+
+}
+?>
