@@ -9,7 +9,7 @@
  *
  * @license http://www.opensource.org/licenses/mit-license.php The MIT License
  * @author Andrea Dal Ponte <dalpo85@gmail.com> - http://github.com/dalpo/cakephp_csv_datasource
-
+ *
  **/
 
 class CsvSource extends DataSource {
@@ -24,8 +24,7 @@ class CsvSource extends DataSource {
   public $delimiter = null; // delimiter between the columns
   public $maxCol = 0;
   public $fields = null;
-  public $page = 1; // start always on the first page
-  public $limit = 0; // just to make the chunks not too big
+  public $limit = false;
 
   protected $_fileHeader  = null;
   protected $_rowNumber = null;
@@ -94,25 +93,29 @@ class CsvSource extends DataSource {
    *
    */
   private function __getDescriptionFromFirstLine() {
+    if(!$this->config['header_row']) {
+      return false;
+    }
     if(!$this->connected || $this->_rowNumber != $this->config['header_row']) {
       $this->_initConnection();
     }
-    $columns = fgetcsv($this->connection, 0, $this->config['delimiter']);
+    $columns = $this->_getNextRow();
     $this->fields = $columns;
     $this->maxCol = count($columns);
-    $this->_initConnection();
 
     return (bool)$this->maxCol;
   }
 
   protected function _initConnection() {
+    if($this->connected) {
+      $this->close();
+    }
     $this->_rowNumber = 0;
     $this->_fileHeader = '';
     if($this->connection = fopen($this->config['path'], "r+")) {
       while( ++$this->_rowNumber < $this->config['header_row'] && !feof($this->connection) ) {
         $this->_fileHeader.= fgets($this->connection);
       }
-//      debug($this->_fileHeader);die(__LINE__);
       return $this->connected = true;
     } else {
       return $this->connected = false;
@@ -136,20 +139,15 @@ class CsvSource extends DataSource {
    *
    */
   function read(&$model, $queryData = array(), $recursive = null) {
-    if (!$this->connected || ($this->_rowNumber != $this->config['header_row']) ) {
+    if (!$this->connected) {
       $this->_initConnection();
     }
 
     // get the limit
     if (isset($queryData['limit']) && !empty($queryData['limit'])) {
-      $this->limit = $queryData['limit'];
+      $this->limit = (int) $queryData['limit'];
     }
-
-    // get the page#
-    if (isset($queryData['page']) && !empty($queryData['page'])) {
-      $this->page = $queryData['page'];
-    }
-
+    // generate an index array of all wanted fields
     if (empty($queryData['fields'])) {
       $fields = $this->fields;
       $allFields = true;
@@ -158,7 +156,6 @@ class CsvSource extends DataSource {
       $allFields = false;
       $_fieldIndex = array();
       $index = 0;
-      // generate an index array of all wanted fields
       foreach($this->fields as $field) {
         if (in_array($field,  $fields)) {
           $_fieldIndex[] = $index;
@@ -167,59 +164,39 @@ class CsvSource extends DataSource {
       }
     }
 
+    
+    // retrive data
     $recordCount = 0;
     $resultSet = array();
-    if(!$this->limit) {
-      $this->page = 1;
-    }
-
-
-    // Daten werden aus der Datei in ein Array $data gelesen ??? cruken..
-    while ( $data = $this->_getNextRow() ) {
-//      Debugger::dump($data);
-//      die();
-//      if ($this->_rowNumber++ <= $this->config['header_row']) { //??? è necessario???
-//        continue;
-//      } else {
-      $recordCount++;
-
-      if($this->limit) {
-        $currentPage = floor( ($recordCount - 1) / $this->limit) + 1;
-      } else {
-        $currentPage = 1;
-      }
-
-
-      // do have have reached our requested page ?
-      if ($this->page != $currentPage) {
+    while ( ($data = $this->_getNextRow()) && (!$this->limit || ($recordCount < $this->limit && $this->limit)) ) {
+      if ($this->_rowNumber  <= $this->config['header_row']) {
         continue;
       }
-
+      
+      $recordCount++;
       $record = array();
+
       if ($allFields) {
+        
         $i = 0;
         $record['id'] = $recordCount;
         foreach($fields as $field) {
           $record[$field] = $data[$i++];
         }
+
       } else {
+
         $record['id'] = $recordCount;
         if (count($_fieldIndex) > 0) {
           foreach($_fieldIndex as $i) {
             $record[$this->fields[$i]] = $data[$i];
           }
         }
+        
       }
       $resultSet[] = array($model->alias => $record);
       unset($record);
-
-      $breakConditions = $recordCount > ( $this->limit * $this->page);
-      if ( $breakConditions ) {
-        break;
-      }
-
     }
-//    }
 
     return $resultSet;
   }
@@ -244,7 +221,7 @@ class CsvSource extends DataSource {
    * Get the next cvs row
    */
   protected function _getNextRow() {
-    if(!$this->connection) {
+    if(!$this->connected) {
       $this->_initConnection();
     }
 
