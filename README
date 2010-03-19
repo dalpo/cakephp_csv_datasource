@@ -18,7 +18,7 @@ class DATABASE_CONFIG {
   public $csvFileConfig = array(
           'datasource' => 'csv',
           'path' => "/path/to/your/file.csv",
-          'startline' => 7 // Start read the file from the line 7
+          'header_row' => 7 // It use this row as header and start to read data from next row... previous rows will be ignored
   );
 
   public $default = array(
