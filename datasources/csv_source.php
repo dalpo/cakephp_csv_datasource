@@ -28,7 +28,7 @@ class CsvSource extends DataSource {
   public $page = 1;
 
   protected $_fileHeader  = null;
-  protected $_rowNumber = null;
+  protected $_rowNumber = 0;
 
   /**
    * Default configuration.
@@ -114,9 +114,12 @@ class CsvSource extends DataSource {
     $this->_rowNumber = 0;
     $this->_fileHeader = '';
     if($this->connection = fopen($this->config['path'], "r+")) {
-      while( ++$this->_rowNumber < $this->config['header_row'] && !feof($this->connection) ) {
+      while( !feof($this->connection) && ($this->_rowNumber + 1) < $this->config['header_row'] ) {
+        $this->_rowNumber++;
         $this->_fileHeader.= fgets($this->connection);
       }
+//      debug($this->_fileHeader);
+//      die();
       return $this->connected = true;
     } else {
       return $this->connected = false;
@@ -170,23 +173,21 @@ class CsvSource extends DataSource {
     }
 
     // retrive data
-    $recordCount = 0;
     $resultSet = array();
-    while ( ($data = $this->_getNextRow()) && (!$this->limit || ($recordCount < ($this->limit * $this->page))) ) {
+    $recordCount = 0;
+    while ( (!$this->limit || ($recordCount < ($this->limit * $this->page))) && ($data = $this->_getNextRow()) ) {
+      $recordCount = $this->_rowNumber - $this->config['header_row'];
       if ($this->_rowNumber  <= $this->config['header_row']) {
         continue;
       }
 
-      // do have have reached our requested page ?
       if($this->limit) {
-        $_page = floor($recordCount / $this->limit) + 1;
-        if ($this->page > $_page) {
-          $recordCount++;
+        $_currentPage = floor($recordCount / $this->limit) + 1;
+        if ($this->page > $_currentPage) {
           continue;
         }
       }
 
-      $recordCount++;
       $record = array();
 
       if ($allFields) {
@@ -207,6 +208,7 @@ class CsvSource extends DataSource {
         }
 
       }
+      $record['_row_number'] = $this->_rowNumber;
       $resultSet[] = array($model->alias => $record);
       unset($record);
     }
@@ -214,7 +216,6 @@ class CsvSource extends DataSource {
     $this->data = $resultSet;
 
     if ($model->findQueryType === 'count') {
-//      $this->_queriesCnt = count($resultSet);
       return array(array(array('count' => count($resultSet))));
     } else {
       return $this->data;
