@@ -25,6 +25,7 @@ class CsvSource extends DataSource {
   public $maxCol = 0;
   public $fields = null;
   public $limit = false;
+  public $page = 1;
 
   protected $_fileHeader  = null;
   protected $_rowNumber = null;
@@ -82,7 +83,7 @@ class CsvSource extends DataSource {
    * @return mixed
    **/
   function describe($model) {
-    if($this->fields) {
+    if(!$this->fields) {
       $this->__getDescriptionFromFirstLine($model);
     }
     return $this->fields;
@@ -143,6 +144,10 @@ class CsvSource extends DataSource {
       $this->_initConnection();
     }
 
+    if (isset($queryData['page']) && !empty($queryData['page'])) {
+      $this->page = $queryData['page'];
+    }
+
     // get the limit
     if (isset($queryData['limit']) && !empty($queryData['limit'])) {
       $this->limit = (int) $queryData['limit'];
@@ -164,20 +169,28 @@ class CsvSource extends DataSource {
       }
     }
 
-    
     // retrive data
     $recordCount = 0;
     $resultSet = array();
-    while ( ($data = $this->_getNextRow()) && (!$this->limit || ($recordCount < $this->limit && $this->limit)) ) {
+    while ( ($data = $this->_getNextRow()) && (!$this->limit || ($recordCount < ($this->limit * $this->page))) ) {
       if ($this->_rowNumber  <= $this->config['header_row']) {
         continue;
       }
-      
+
+      // do have have reached our requested page ?
+      if($this->limit) {
+        $_page = floor($recordCount / $this->limit) + 1;
+        if ($this->page > $_page) {
+          $recordCount++;
+          continue;
+        }
+      }
+
       $recordCount++;
       $record = array();
 
       if ($allFields) {
-        
+
         $i = 0;
         $record['id'] = $recordCount;
         foreach($fields as $field) {
@@ -192,13 +205,20 @@ class CsvSource extends DataSource {
             $record[$this->fields[$i]] = $data[$i];
           }
         }
-        
+
       }
       $resultSet[] = array($model->alias => $record);
       unset($record);
     }
 
-    return $resultSet;
+    $this->data = $resultSet;
+
+    if ($model->findQueryType === 'count') {
+//      $this->_queriesCnt = count($resultSet);
+      return array(array(array('count' => count($resultSet))));
+    } else {
+      return $this->data;
+    }
   }
 
   /**
@@ -232,7 +252,19 @@ class CsvSource extends DataSource {
       return false;
     }
 
+  }
 
+  /**
+   * Calculate
+   *
+   * @param Model $model
+   * @param mixed $func
+   * @param array $params
+   * @return array
+   * @access public
+   */
+  function calculate(&$model, $func, $params = array()) {
+    return array('count' => true);
   }
 
 }
