@@ -175,7 +175,7 @@ class CsvSource extends DataSource {
     // retrive data
     $resultSet = array();
     $recordCount = 0;
-    while ( (!$this->limit || ($recordCount < ($this->limit * $this->page))) && ($data = $this->_getNextRow()) ) {
+    while ( (!$this->limit || ( $recordCount < ($this->limit * $this->page) - 1 ) ) && ($data = $this->_getNextRow()) ) {
       $recordCount = $this->_rowNumber - $this->config['header_row'];
       if ($this->_rowNumber  <= $this->config['header_row']) {
         continue;
@@ -212,6 +212,8 @@ class CsvSource extends DataSource {
       $resultSet[] = array($model->alias => $record);
       unset($record);
     }
+
+    $this->_initConnection();
 
     $this->data = $resultSet;
 
