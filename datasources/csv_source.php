@@ -101,7 +101,9 @@ class CsvSource extends DataSource {
       $this->_initConnection();
     }
     $columns = $this->_getNextRow();
-    $this->fields = $columns;
+    $this->fields = array_map(function($column) {
+      return (trim(strtolower($column)));
+    }, $columns);
     $this->maxCol = count($columns);
 
     return (bool)$this->maxCol;
@@ -195,7 +197,7 @@ class CsvSource extends DataSource {
         $i = 0;
         $record['id'] = $recordCount;
         foreach($fields as $field) {
-          $record[$field] = $data[$i++];
+          $record[trim(strtolower($field))] = $data[$i++];
         }
 
       } else {
@@ -214,6 +216,58 @@ class CsvSource extends DataSource {
     }
 
     $this->_initConnection();
+
+    /*Filtering results*/
+    if (isset($queryData['conditions'])) {
+      if (!empty($queryData['conditions'])) {
+        $filtered_data = array();
+        foreach ($resultSet as $id => $row) {
+          $total_conditions = count($queryData['conditions']);
+          $iterator_conditions = 0;
+          foreach ($queryData['conditions'] as $column_operator => $value) {
+            list($column, $operator) = array_pad(explode(' ', $column_operator, 2), 2, null);
+            if (isset($row[$model->alias][$column])) {
+              switch ($operator) {
+                case '>=':
+                  if ($row[$model->alias][$column] >= $value) {
+                    $iterator_conditions += 1;
+                  }
+                  break;
+                case '>':
+                  if ($row[$model->alias][$column] > $value) {
+                    $iterator_conditions += 1;
+                  }
+                  break;
+                case '=':
+                  if ($row[$model->alias][$column] == $value) {
+                    $iterator_conditions += 1;
+                  }
+                  break;
+                case '<':
+                  if ($row[$model->alias][$column] < $value) {
+                    $iterator_conditions += 1;
+                  }
+                  break;
+                case '<=':
+                  if ($row[$model->alias][$column] <= $value) {
+                    $iterator_conditions += 1;
+                  }
+                  break;
+                default:
+                  if ($row[$model->alias][$column] == $value) {
+                    $iterator_conditions += 1;
+                  }
+                  break;
+              }
+            }
+          }
+          if ($total_conditions == $iterator_conditions) {
+            $filtered_data[] = $row;
+          }
+        }
+        $resultSet = $filtered_data;
+      }
+    }
 
     $this->data = $resultSet;
 
@@ -268,6 +322,21 @@ class CsvSource extends DataSource {
    */
   function calculate(&$model, $func, $params = array()) {
     return array('count' => true);
+  }
+
+  private function __arrayfilter($array, $callback = null) {
+    if ($callback == null) {
+        $callback = function($key, $val) {
+            return (bool) $val;
+        };
+    }
+    $return = array();
+    foreach ($array as $key => $val) {
+        if ($callback($key, $val)) {
+            $return[$key] = $val;
+        }
+    }
+    return $return;
   }
 
 }
